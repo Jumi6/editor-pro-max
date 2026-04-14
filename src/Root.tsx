@@ -19,6 +19,7 @@ import {BeforeAfterDemo} from "./compositions/BeforeAfterDemo";
 // Editing templates
 import {TalkingHeadEdit} from "./templates/editing/TalkingHeadEdit";
 import {PodcastClip} from "./templates/editing/PodcastClip";
+import {AIReelTemplate} from "./templates/editing/AIReelTemplate";
 
 export const RemotionRoot: React.FC = () => {
   return (
@@ -133,6 +134,25 @@ export const RemotionRoot: React.FC = () => {
       </Folder>
 
       <Folder name="Editing">
+        {/* ── AIReel: plantilla principal de Juanma para Reels/TikTok/Shorts ── */}
+        <Composition
+          id="AIReel"
+          component={AIReelTemplate}
+          durationInFrames={1800}
+          fps={30}
+          width={1080}
+          height={1920}
+          defaultProps={{
+            videoSrc: "assets/video.mp4",
+            showCaptions: true,
+            captionPreset: "bold" as const,
+            removeSilence: false,
+            showIntro: true,
+            ctaText: "Sígueme @juanma.salmeron",
+            ctaSubtext: "IA que trabaja por ti 24/7",
+            graphics: [],
+          }}
+        />
         <Composition
           id="TalkingHeadEdit"
           component={TalkingHeadEdit}
