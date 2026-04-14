@@ -1,5 +1,8 @@
 import {Composition, Folder} from "remotion";
 
+// Auto-generated editor config (written by scripts/editor.ts)
+import {EDIT_CONFIG} from "./edit-config";
+
 // Compositions
 import {ShowcaseComposition} from "./compositions/Showcase";
 
@@ -135,6 +138,7 @@ export const RemotionRoot: React.FC = () => {
 
       <Folder name="Editing">
         {/* ── AIReel: plantilla principal de Juanma para Reels/TikTok/Shorts ── */}
+        {/* Props driven by scripts/editor.ts → src/edit-config.ts */}
         <Composition
           id="AIReel"
           component={AIReelTemplate}
@@ -151,6 +155,7 @@ export const RemotionRoot: React.FC = () => {
             ctaText: "Sígueme @juanma.salmeron",
             ctaSubtext: "IA que trabaja por ti 24/7",
             graphics: [],
+            ...EDIT_CONFIG,
           }}
         />
         <Composition
