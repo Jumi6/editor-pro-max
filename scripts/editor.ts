@@ -11,24 +11,20 @@
  *   2. Copia el vídeo a public/assets/video.mp4
  *   3. Corre el pipeline (transcripción + detección de silencios)
  *   4. Te pregunta en lenguaje natural qué quieres hacer
- *   5. Claude traduce tu descripción a props de AIReelTemplate
+ *   5. Usa Claude Code (el `claude` que tienes en la terminal) para generar los props
  *   6. Escribe src/edit-config.ts con los props generados
  *   7. Abre Remotion Studio para que veas el resultado
  *
  * Requisitos:
  *   - Node.js 20+, npx tsx, npm install hecho
- *   - ANTHROPIC_API_KEY (la misma que usas con Claude Code)
- *       echo "ANTHROPIC_API_KEY=sk-ant-..." >> .env.local
- *       source .env.local && npx tsx scripts/editor.ts
+ *   - Claude Code instalado y autenticado (si puedes ejecutar `claude`, estás listo)
  */
 
-import Anthropic from "@anthropic-ai/sdk";
 import {
   existsSync,
   copyFileSync,
   mkdirSync,
   writeFileSync,
-  readFileSync,
 } from "fs";
 import {createInterface} from "readline";
 import {execSync, spawn} from "child_process";
@@ -66,10 +62,24 @@ function hr() {
 
 // ─── Config ─────────────────────────────────────────────────────────────────
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const EDIT_CONFIG_PATH = path.join(process.cwd(), "src", "edit-config.ts");
 const PUBLIC_ASSETS = path.join(process.cwd(), "public", "assets");
 const TARGET_VIDEO = path.join(PUBLIC_ASSETS, "video.mp4");
+
+// ─── Verificar que Claude Code está disponible ───────────────────────────────
+
+function checkClaudeAvailable(): void {
+  try {
+    execSync("claude --version", {stdio: "pipe"});
+  } catch {
+    console.error("");
+    console.error("  ERROR: No se encontró el comando `claude`.");
+    console.error("  Claude Code debe estar instalado y autenticado.");
+    console.error("  Descárgalo en: https://claude.ai/download");
+    console.error("");
+    process.exit(1);
+  }
+}
 
 // ─── Step 1: Obtener ruta del vídeo ─────────────────────────────────────────
 
@@ -87,7 +97,6 @@ async function getVideoPath(): Promise<string> {
   info("No has pasado ningún vídeo como argumento.");
   info("");
 
-  // Check if there's already a video in the right place
   if (existsSync(TARGET_VIDEO)) {
     const use = await ask(
       "  Ya existe public/assets/video.mp4. ¿Usarlo? [S/n] "
@@ -121,7 +130,7 @@ function copyVideo(sourcePath: string): void {
     return;
   }
 
-  info(`Copiando vídeo a public/assets/video.mp4...`);
+  info("Copiando vídeo a public/assets/video.mp4...");
   copyFileSync(absSource, TARGET_VIDEO);
   ok("Vídeo copiado");
 }
@@ -174,31 +183,27 @@ function runPipeline(): void {
   }
 }
 
-// ─── Step 4 + 5: Claude genera los props ─────────────────────────────────────
+// ─── Step 4 + 5: Claude Code genera los props ────────────────────────────────
 
-const SYSTEM_PROMPT = `Eres el asistente de edición de vídeo de Juanma Salmerón (Atiendo365 / BotGrow.AI).
-Tu trabajo es convertir instrucciones en lenguaje natural a un objeto JSON válido de AIReelTemplateProps.
+const CLAUDE_PROMPT_TEMPLATE = `Eres el asistente de edición de vídeo de Juanma Salmerón (Atiendo365 / BotGrow.AI).
+Convierte esta instrucción en lenguaje natural a un objeto TypeScript de AIReelTemplateProps.
 
-Contexto del proyecto:
-- Plantilla: AIReelTemplate (1080×1920 portrait, 60 segundos, 30fps)
-- Marca: Atiendo365, handle @juanma.salmeron, colores navy #1a2e5a + cyan #00a8e8
-- CTA por defecto: "Sígueme @juanma.salmeron" / "IA que trabaja por ti 24/7"
+Instrucción del usuario: "INSTRUCCION"
 
-Interfaz de props (TypeScript):
+Interfaz de referencia:
 interface GraphicItem {
   src: string;           // "assets/nombre.png"
-  showAtSecond: number;  // segundo del vídeo en que aparece
+  showAtSecond: number;
   durationSeconds: number;
-  x?: number | string;   // posición X (default: centrado)
-  y?: number | string;   // posición Y (default: 300)
-  width?: number;        // px (default: 900)
-  height?: number;       // px
+  x?: number | string;
+  y?: number | string;
+  width?: number;
+  height?: number;
 }
-
 interface AIReelTemplateProps {
-  videoSrc?: string;                  // "assets/video.mp4"
-  captionsPath?: string;              // "captions.json"
-  silencePath?: string;               // "silence.json"
+  videoSrc?: string;
+  captionsPath?: string;
+  silencePath?: string;
   removeSilence?: boolean;
   showCaptions?: boolean;
   captionPreset?: "classic" | "bold" | "outline" | "glow" | "box";
@@ -207,84 +212,75 @@ interface AIReelTemplateProps {
   ctaSubtext?: string;
   graphics?: GraphicItem[];
   backgroundMusic?: string;
-  musicVolume?: number;               // 0.0–1.0
-  accentColor?: string;              // color hex del highlight de captions
+  musicVolume?: number;
+  accentColor?: string;
 }
 
-REGLAS:
-1. Responde SOLO con el bloque de código TypeScript entre triple backticks (no markdown, solo el JSON/objeto).
-2. El formato debe ser exactamente el cuerpo de un objeto TypeScript válido (sin tipo, sin export).
-3. Incluye SOLO los props que el usuario ha mencionado o que sean relevantes para su intención.
-4. Si el usuario no menciona algo, NO lo incluyas (se usará el valor por defecto).
-5. Si el usuario habla de "silencios", "pausas" o "cortes", pon removeSilence: true.
-6. Si el usuario habla de "subtítulos", "captions" o "texto", pon showCaptions: true.
-7. Para gráficos, pide src de archivos en public/assets/ con el nombre que el usuario indique.
+Contexto de marca:
+- Handle: @juanma.salmeron
+- Marca: Atiendo365 · BotGrow.AI
+- Colores: navy #1a2e5a, cyan #00a8e8
 
-Ejemplo de respuesta:
+Reglas estrictas:
+1. Responde ÚNICAMENTE con el bloque de código entre triple backticks.
+2. El contenido entre los backticks debe ser solo el cuerpo del objeto (sin tipo, sin export, sin import).
+3. Incluye solo los props relevantes para la instrucción del usuario.
+4. Si menciona silencios/pausas/cortes → removeSilence: true
+5. Si menciona subtítulos/captions/texto → showCaptions: true
+6. No inventes gráficos que el usuario no haya mencionado.
+
+Ejemplo de respuesta correcta:
 \`\`\`
 {
   showCaptions: true,
   captionPreset: "bold",
   removeSilence: true,
-  ctaText: "Sígueme para más tips de IA",
-  ctaSubtext: "Atiendo365.com",
-  graphics: [
-    { src: "assets/grafico-ia.png", showAtSecond: 15, durationSeconds: 4 }
-  ]
+  ctaText: "Sígueme para más tips",
+  ctaSubtext: "Atiendo365.com"
 }
 \`\`\``;
 
-async function generateConfig(userRequest: string): Promise<string> {
-  if (!ANTHROPIC_API_KEY) {
-    console.error("");
-    console.error("  ERROR: Falta ANTHROPIC_API_KEY.");
-    console.error(
-      "  Añádela en .env.local: echo 'ANTHROPIC_API_KEY=sk-ant-...' >> .env.local"
-    );
-    console.error("  Luego: source .env.local && npx tsx scripts/editor.ts");
-    console.error("");
+function generateConfigWithClaude(userRequest: string): string {
+  const prompt = CLAUDE_PROMPT_TEMPLATE.replace("INSTRUCCION", userRequest.replace(/"/g, '\\"'));
+
+  info("Consultando a Claude Code...");
+  console.log("");
+
+  let result: string;
+  try {
+    // claude -p "prompt" — modo no interactivo, imprime la respuesta y sale
+    result = execSync(`claude -p ${JSON.stringify(prompt)}`, {
+      encoding: "utf-8",
+      maxBuffer: 1024 * 1024,
+      timeout: 60000,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("\n  ERROR al consultar Claude Code:", msg, "\n");
     process.exit(1);
   }
 
-  const client = new Anthropic({apiKey: ANTHROPIC_API_KEY});
-
-  info("Consultando a Claude...");
-  console.log("");
-
-  const stream = client.messages.stream({
-    model: "claude-haiku-4-5",
-    max_tokens: 1024,
-    system: SYSTEM_PROMPT,
-    messages: [{role: "user", content: userRequest}],
-  });
-
-  let fullText = "";
-  process.stdout.write("  ");
-  stream.on("text", (delta) => {
-    process.stdout.write(delta);
-    fullText += delta;
-  });
-
-  await stream.finalMessage();
-  console.log("\n");
-
-  return fullText;
+  return result;
 }
 
-// Extract the object literal from Claude's response
+// Extrae el objeto literal de la respuesta de Claude
 function extractPropsObject(claudeResponse: string): string {
-  // Try to find content between triple backticks
   const match = claudeResponse.match(/```(?:typescript|ts|json)?\s*([\s\S]*?)```/);
   if (match) {
     return match[1].trim();
   }
-  // Fallback: return the whole response trimmed
+  // Fallback: si no hay backticks, intentar encontrar un objeto { ... }
+  const objMatch = claudeResponse.match(/\{[\s\S]*\}/);
+  if (objMatch) {
+    return objMatch[0].trim();
+  }
   return claudeResponse.trim();
 }
 
 // ─── Step 6: Escribir edit-config.ts ─────────────────────────────────────────
 
 function writeEditConfig(propsBody: string): void {
+  const body = propsBody.startsWith("{") ? propsBody : `{\n  ${propsBody}\n}`;
   const content = `import type {AIReelTemplateProps} from "./templates/editing/AIReelTemplate";
 
 /**
@@ -292,10 +288,10 @@ function writeEditConfig(propsBody: string): void {
  * Generado automáticamente por: npx tsx scripts/editor.ts
  * No edites este archivo manualmente — usa el CLI del editor.
  */
-export const EDIT_CONFIG: Partial<AIReelTemplateProps> = ${propsBody.startsWith("{") ? propsBody : `{\n  ${propsBody}\n}`};
+export const EDIT_CONFIG: Partial<AIReelTemplateProps> = ${body};
 `;
   writeFileSync(EDIT_CONFIG_PATH, content, "utf-8");
-  ok(`src/edit-config.ts actualizado`);
+  ok("src/edit-config.ts actualizado");
 }
 
 // ─── Step 7: Lanzar Remotion Studio ─────────────────────────────────────────
@@ -323,6 +319,9 @@ function launchStudio(): void {
 
 async function main() {
   banner("Atiendo365 · Editor Pro Max");
+
+  // Verificar Claude Code
+  checkClaudeAvailable();
 
   // 1. Obtener vídeo
   const videoPath = await getVideoPath();
@@ -374,8 +373,8 @@ async function main() {
   const userRequest = await ask("  ¿Qué quieres hacer con el vídeo? → ");
   console.log("");
 
-  // 5. Claude genera props
-  const claudeResponse = await generateConfig(userRequest);
+  // 5. Claude Code genera props
+  const claudeResponse = generateConfigWithClaude(userRequest);
   const propsBody = extractPropsObject(claudeResponse);
 
   // 6. Escribir config
